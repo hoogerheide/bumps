@@ -68,6 +68,14 @@ async function reload_history(timestamp: string) {
   }
 }
 
+async function resume_fit(timestamp: string) {
+  const confirmation = warning_seen.value || confirm('Resuming fit will overwrite current state: continue?');
+  if (confirmation) {
+    await props.socket.asyncEmit('resume_fit', timestamp);
+    warning_seen.value = true;
+  }
+}
+
 async function toggle_keep(timestamp: string, current_keep: boolean) {
   await props.socket.asyncEmit('set_keep_history', timestamp, !current_keep);
 }
@@ -152,6 +160,9 @@ onMounted(async () => {
               <td class="text-nowrap">
                 <button class="btn btn-secondary btn-sm mx-1 text-nowrap" @click="reload_history(timestamp)">
                   Load
+                </button>
+                <button v-show="has_uncertainty" class="btn btn-secondary btn-sm mx-1 text-nowrap" @click="resume_fit(timestamp)">
+                  Resume
                 </button>
                 <span v-show="has_population" class="badge bg-success" title="has population">P</span>
                 <span v-show="has_uncertainty" class="badge bg-warning" title="has uncertainty">U</span>

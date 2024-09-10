@@ -22,7 +22,7 @@ import bumps.fitproblem
 import bumps.dream.views, bumps.dream.varplot, bumps.dream.stats, bumps.dream.state
 import bumps.errplot
 
-from .state_hdf5_backed import UNDEFINED, UNDEFINED_TYPE, State, serialize_problem, deserialize_problem, SERIALIZER_EXTENSIONS
+from .state_hdf5_backed import UNDEFINED, UNDEFINED_TYPE, State, serialize_problem, deserialize_problem, SERIALIZER_EXTENSIONS, resize_uncertainty_state
 from .fit_thread import FitThread, EVT_FIT_COMPLETE, EVT_FIT_PROGRESS
 from .varplot import plot_vars
 from .logger import logger, console_handler
@@ -142,8 +142,13 @@ async def save_to_history(label: str, include_population: bool = False, include_
 
 @register
 async def reload_history_item(timestamp: str):
-    state.reload_history_item(timestamp)
+    state.reload_history_item(timestamp, include_options=False)
 
+@register
+async def resume_fit(timestamp: str):
+    state.reload_history_item(timestamp, include_options=True)
+    state.fitting.uncertainty_state = resize_uncertainty_state(state.fitting.uncertainty_state)
+    await start_fit_thread(resume=True)
 
 @register
 async def set_keep_history(timestamp: str, keep: bool):
@@ -344,6 +349,10 @@ async def stop_fit():
     else:
         state.shared.active_fit = {}
 
+    print(state.fitting.uncertainty_state._gen_index,
+          state.fitting.uncertainty_state._update_index,
+          state.fitting.uncertainty_state._thin_index)
+
 @register
 async def get_chisq(problem: Optional[bumps.fitproblem.FitProblem]=None, nllf=None):
     problem = state.problem.fitProblem if problem is None else problem
@@ -371,7 +380,10 @@ def get_running_loop():
         return None
 
 @register
-async def start_fit_thread(fitter_id: str="", options=None, terminate_on_finish=False):
+async def start_fit_thread(fitter_id: str="",
+                           options=None,
+                           terminate_on_finish=False,
+                           resume=False):
     options = {} if options is None else options    # session_id: str = app["active_session"]
     fitProblem = state.problem.fitProblem if state.problem is not None else None
     if fitProblem is None:
@@ -379,6 +391,25 @@ async def start_fit_thread(fitter_id: str="", options=None, terminate_on_finish=
     else:
         state.calling_loop = get_running_loop()
         fit_state = state.fitting
+
+        # if a new fit, save the fit options and fitter_id;
+        # otherwise, load in the state (and fit options) to resume
+        if not resume:
+            fit_state.fit_options = options
+            fit_state.fitter_id = fitter_id
+            resume_state = None
+        else:
+            resume_state = state.fitting.uncertainty_state
+            fitter_id = state.fitting.fitter_id
+
+            # Condition options; some cannot change (like samples or steps or pop),
+            # but burn steps can
+            burn = state.shared.fitter_settings.get('burn', None)
+            options = state.fitting.fit_options
+            if burn is not None:
+                options['burn'] = burn
+
+
         fitclass = FITTERS_BY_ID[fitter_id]
         if state.fit_thread is not None:
             # warn that fit is alread running...
@@ -406,6 +437,7 @@ async def start_fit_thread(fitter_id: str="", options=None, terminate_on_finish=
             fitclass=fitclass,
             options=options,
             parallel=state.parallel,
+            resume_state=resume_state,
             # session_id=session_id,
             # Number of seconds between updates to the GUI, or 0 for no updates
             convergence_update=5,

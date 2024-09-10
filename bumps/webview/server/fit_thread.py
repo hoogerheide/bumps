@@ -177,7 +177,7 @@ class FitThread(Thread):
     def __init__(self, abort_event: Event, problem=None,
                  fitclass=None, options=None, mapper=None, parallel=0,
                  convergence_update=5, uncertainty_update=300,
-                 terminate_on_finish=False):
+                 terminate_on_finish=False, resume_state=None):
         # base class initialization
         # Process.__init__(self)
 
@@ -191,6 +191,7 @@ class FitThread(Thread):
         self.convergence_update = convergence_update
         self.uncertainty_update = uncertainty_update
         self.terminate_on_finish = terminate_on_finish
+        self.resume_state = resume_state
 
     def abort_test(self):
         return self.abort_event.is_set()
@@ -240,7 +241,7 @@ class FitThread(Thread):
                 mapper=mapper.start_mapper(problem, [], cpus=self.parallel),
                 **self.options)
 
-            x, fx = driver.fit()
+            x, fx = driver.fit(resume_from_state=self.resume_state)
             # Give final state message from monitors
             for M in monitors:
                 if hasattr(M, 'final'):

@@ -281,6 +281,8 @@ class UncertaintyStateStorage:
             setattr(self, attrname, read_ndarray(group, attrname))
 
 class FittingState:
+    fitter_id: Optional[str] = ""
+    fit_options: Optional[dict] = None
     population: Optional[List] = None
     uncertainty_state: Optional['bumps.dream.state.MCMCDraw'] = None
 
@@ -293,6 +295,9 @@ class FittingState:
             write_uncertainty_state(uncertainty_state, uncertainty_state_storage)
             uncertainty_state_storage.write(group)
 
+        write_string(group, 'fitter_id', self.fitter_id)
+        write_json(group, 'fit_options', json.dumps(self.fit_options))
+
     def read(self, parent: 'Group'):
         group = parent['fitting']
         population = read_ndarray(group, 'population')
@@ -301,7 +306,9 @@ class FittingState:
             uncertainty_state_storage = UncertaintyStateStorage()
             uncertainty_state_storage.read(group)
             self.uncertainty_state = read_uncertainty_state(uncertainty_state_storage)
-
+        
+        self.fitter_id = read_string(group, 'fitter_id')
+        self.fit_options = read_json(group, 'fit_options')
 
 class State:
     # These attributes are ephemeral, not to be serialized/stored:
@@ -362,6 +369,9 @@ class State:
             # rather than making a memory-hogging copy on first use.
             item.fitting.uncertainty_state = self.fitting.uncertainty_state
 
+        item.fitting.fitter_id = self.fitting.fitter_id
+        item.fitting.fit_options = self.fitting.fit_options
+
         item.timestamp = str(datetime.now())
         item.label = label
         item.chisq_str = item.problem.fitProblem.chisq_str()
@@ -376,7 +386,7 @@ class State:
     def remove_history_item(self, timestamp: str):
         self.history.remove_item(timestamp)
 
-    def reload_history_item(self, timestamp: str):
+    def reload_history_item(self, timestamp: str, include_options: bool):
         for item in self.history.store:
             if item.timestamp == timestamp:
                 print("problem found!", timestamp)
@@ -391,6 +401,9 @@ class State:
                 if item.fitting.uncertainty_state is not None:
                     self.fitting.uncertainty_state = item.fitting.uncertainty_state
                     self.shared.updated_uncertainty = now_string()
+                if include_options:
+                    self.fitting.fit_options = item.fitting.fit_options
+                    self.fitting.fitter_id = item.fitting.fitter_id
                 return
         raise ValueError(f"Could not find history item with timestamp {timestamp}")
     
@@ -525,6 +538,17 @@ def read_uncertainty_state(loaded: UncertaintyStateStorage, skip=0, report=0, de
     state._good_chains = slice(None, None) if (good_chains is None or good_chains is UNDEFINED) else good_chains.astype(int)
 
     return state
+
+def resize_uncertainty_state(state: MCMCDraw) -> MCMCDraw:
+    newstate = deepcopy(state)
+    newstate.generation = newstate.Ngen
+    newstate._update_count = newstate.Nupdate
+    newstate._thin_count = newstate.Nthin
+
+    _, Npop, _ = newstate._thin_point.shape
+    newstate.draws = newstate.Ngen * Npop
+
+    return newstate
 
 class ActiveFit(TypedDict):
     fitter_id: str

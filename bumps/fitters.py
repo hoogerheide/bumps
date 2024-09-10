@@ -954,14 +954,19 @@ class FitDriver(object):
         self.fitter = None
         self.result = None
 
-    def fit(self, resume=None):
+    def fit(self, resume=None, resume_from_state=None):
 
         if hasattr(self, '_cov'):
             del self._cov
         if hasattr(self, '_stderr'):
             del self._stderr
         fitter = self.fitclass(self.problem)
-        if resume:
+        if resume_from_state is not None:
+            if hasattr(fitter, 'state'):
+                fitter.state = resume_from_state
+            else:
+                warnings.warn('Warning: attempting to resume from state but fitter does not have a state attribute')
+        elif resume:
             fitter.load(resume)
         starts = self.options.get('starts', 1)
         if starts > 1:
